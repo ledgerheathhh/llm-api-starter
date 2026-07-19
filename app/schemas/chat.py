@@ -1,10 +1,17 @@
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(
-        min_length=1,
-        max_length=2000,
+    message: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=2000,
+        ),
+    ] = Field(
         description="用户发送的消息",
     )
     conversation_id: str | None = Field(

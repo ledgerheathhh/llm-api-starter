@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, APIError, APITimeoutError
@@ -8,6 +10,9 @@ from app.services.llm_service import (
     chat_completion,
     stream_chat_completion,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -23,33 +28,38 @@ async def chat(request: ChatRequest) -> ChatResponse:
         return await chat_completion(request)
 
     except APITimeoutError:
+        logger.exception("模型请求超时")
         raise HTTPException(
             status_code=504,
             detail="模型请求超时",
         )
 
     except APIConnectionError:
+        logger.exception("无法连接到模型服务")
         raise HTTPException(
             status_code=502,
             detail="无法连接到模型服务",
         )
 
-    except APIError as e:
+    except APIError:
+        logger.exception("模型服务错误")
         raise HTTPException(
             status_code=502,
-            detail=f"模型服务错误: {str(e)}",
+            detail="模型服务错误",
         )
 
-    except EmptyModelResponseError as e:
+    except EmptyModelResponseError:
+        logger.exception("模型返回为空")
         raise HTTPException(
             status_code=502,
-            detail=str(e),
+            detail="模型返回为空",
         )
 
-    except RuntimeError as e:
+    except RuntimeError:
+        logger.exception("模型服务配置错误")
         raise HTTPException(
             status_code=500,
-            detail=str(e),
+            detail="模型服务配置错误",
         )
 
 

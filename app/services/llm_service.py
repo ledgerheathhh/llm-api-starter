@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -9,13 +10,17 @@ from app.schemas.chat import ChatRequest, ChatResponse
 
 
 SYSTEM_PROMPT = "你是一个 AI 助手，回答要准确、简洁、结构清晰。"
+logger = logging.getLogger(__name__)
+
+LLMClientConfig = tuple[AsyncOpenAI, str, str]
+_llm_client_config: LLMClientConfig | None = None
 
 
 class EmptyModelResponseError(RuntimeError):
     pass
 
 
-def create_llm_client() -> tuple[AsyncOpenAI, str, str]:
+def create_llm_client() -> LLMClientConfig:
     """根据配置创建 LLM Client，并返回 client、provider 和 model。"""
     provider = settings.LLM_PROVIDER
 
@@ -48,6 +53,31 @@ def create_llm_client() -> tuple[AsyncOpenAI, str, str]:
     raise RuntimeError(f"不支持的 LLM_PROVIDER: {provider}")
 
 
+def get_llm_client() -> LLMClientConfig:
+    """首次调用时创建客户端，后续请求复用同一个连接池。"""
+    global _llm_client_config
+
+    if _llm_client_config is None:
+        _llm_client_config = create_llm_client()
+
+    return _llm_client_config
+
+
+async def close_llm_client() -> None:
+    """关闭已创建的客户端。"""
+    global _llm_client_config
+
+    if _llm_client_config is None:
+        return
+
+    client, _, _ = _llm_client_config
+
+    try:
+        await client.close()
+    finally:
+        _llm_client_config = None
+
+
 def build_messages(message: str) -> list[dict[str, str]]:
     """构造发送给模型的 messages。"""
     return [
@@ -69,7 +99,7 @@ def to_sse_data(data: dict) -> str:
 
 async def chat_completion(request: ChatRequest) -> ChatResponse:
     conversation_id = request.conversation_id or str(uuid4())
-    client, provider, model = create_llm_client()
+    client, provider, model = get_llm_client()
 
     completion = await client.chat.completions.create(
         model=model,
@@ -77,6 +107,9 @@ async def chat_completion(request: ChatRequest) -> ChatResponse:
         temperature=0.3,
         stream=False,
     )
+
+    if not completion.choices:
+        raise EmptyModelResponseError("模型返回为空")
 
     answer = completion.choices[0].message.content
 
@@ -96,7 +129,7 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
     conversation_id = request.conversation_id or str(uuid4())
 
     try:
-        client, provider, model = create_llm_client()
+        client, provider, model = get_llm_client()
 
         yield to_sse_data(
             {
@@ -138,6 +171,7 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
         )
 
     except APITimeoutError:
+        logger.exception("模型请求超时")
         yield to_sse_data(
             {
                 "type": "error",
@@ -146,6 +180,7 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
         )
 
     except APIConnectionError:
+        logger.exception("无法连接到模型服务")
         yield to_sse_data(
             {
                 "type": "error",
@@ -153,26 +188,29 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
             }
         )
 
-    except APIError as e:
+    except APIError:
+        logger.exception("模型服务错误")
         yield to_sse_data(
             {
                 "type": "error",
-                "message": f"模型服务错误: {str(e)}",
+                "message": "模型服务错误",
             }
         )
 
-    except RuntimeError as e:
+    except RuntimeError:
+        logger.exception("模型服务配置错误")
         yield to_sse_data(
             {
                 "type": "error",
-                "message": str(e),
+                "message": "模型服务配置错误",
             }
         )
 
-    except Exception as e:
+    except Exception:
+        logger.exception("流式聊天服务异常")
         yield to_sse_data(
             {
                 "type": "error",
-                "message": f"服务异常: {str(e)}",
+                "message": "服务异常",
             }
         )

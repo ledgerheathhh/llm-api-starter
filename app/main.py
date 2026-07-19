@@ -1,12 +1,25 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.chat import router as chat_router
+from app.services.llm_service import close_llm_client
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await close_llm_client()
 
 
 app = FastAPI(
     title="LLM API Starter",
     version="0.3.0",
+    lifespan=lifespan,
 )
 
 
