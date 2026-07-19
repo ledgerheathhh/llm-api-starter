@@ -7,7 +7,15 @@ A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, OpenR
 ```text
 .
 ├── app/
-│   └── main.py        # FastAPI application, LLM configuration, and chat endpoints
+│   ├── core/
+│   │   └── config.py       # Environment configuration
+│   ├── routers/
+│   │   └── chat.py         # Chat API routes and HTTP error mapping
+│   ├── schemas/
+│   │   └── chat.py         # Request and response models
+│   ├── services/
+│   │   └── llm_service.py  # Provider selection and LLM calls
+│   └── main.py             # FastAPI application and router registration
 ├── .env.example       # Environment variable example
 ├── .gitignore
 ├── README.md
