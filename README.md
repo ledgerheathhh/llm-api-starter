@@ -14,8 +14,10 @@ A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, OpenR
 │   ├── schemas/
 │   │   └── chat.py         # Request and response models
 │   ├── services/
-│   │   └── llm_service.py  # Provider selection and LLM calls
-│   └── main.py             # FastAPI application and router registration
+│   │   └── llm_service.py  # Provider selection, client lifecycle, and LLM calls
+│   └── main.py             # FastAPI application, lifecycle, and router registration
+├── tests/
+│   └── test_chat.py        # Chat, validation, error, and lifecycle tests
 ├── .env.example       # Environment variable example
 ├── .gitignore
 ├── README.md
@@ -101,6 +103,7 @@ Example request:
 ```
 
 - `message`: Required. Must contain between 1 and 2,000 characters.
+- Leading and trailing whitespace is removed. A message containing only whitespace is rejected with HTTP `422`.
 - `conversation_id`: Optional. The server generates a UUID when this field is omitted. It currently identifies the request only; the server does not automatically store or load conversation history.
 
 Example response:
@@ -148,9 +151,11 @@ data: {"type":"done"}
 If the request fails, the stream returns an `error` event and then closes:
 
 ```text
-data: {"type":"error","message":"The model request timed out."}
+data: {"type":"error","message":"模型请求超时"}
 
 ```
+
+Error messages returned to clients are intentionally stable and do not include raw provider or internal exception details. Detailed exceptions are written to the server logs.
 
 Use `-N` to disable curl response buffering and display events as they arrive:
 
@@ -158,4 +163,25 @@ Use `-N` to disable curl response buffering and display events as they arrive:
 curl -N -X POST http://127.0.0.1:8000/chat/stream \
   -H 'Content-Type: application/json' \
   -d '{"message":"Describe FastAPI in three points."}'
+```
+
+## Runtime Behavior
+
+The LLM client is created lazily on the first chat request and reused by later requests so its connection pool can be shared. FastAPI closes the client during application shutdown. This means the service and `/health` can start without an API key, while chat requests report a configuration error until the selected provider is configured.
+
+The API returns sanitized errors:
+
+| Scenario | Standard endpoint | Streaming endpoint |
+| --- | --- | --- |
+| Provider timeout | HTTP `504` | `error` event with `模型请求超时` |
+| Provider connection failure | HTTP `502` | `error` event with `无法连接到模型服务` |
+| Provider API failure | HTTP `502` | `error` event with `模型服务错误` |
+| Missing or invalid provider configuration | HTTP `500` | `error` event with `模型服务配置错误` |
+
+## Testing
+
+The tests use Python's standard-library `unittest` module and mock all LLM calls, so they do not require an API key or send requests to DeepSeek or OpenRouter.
+
+```bash
+python -m unittest discover -v
 ```
