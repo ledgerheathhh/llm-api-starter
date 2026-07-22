@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from app import main
 from app.routers import chat as chat_router
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatMessage, ChatRequest, ChatResponse
 from app.services import llm_service
 
 
@@ -120,6 +120,24 @@ class ChatRequestTests(unittest.TestCase):
     def test_whitespace_only_message_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):
             ChatRequest(message="   ")
+
+
+class ChatMessageTests(unittest.TestCase):
+    def test_chat_message_can_be_created(self) -> None:
+        message = ChatMessage(
+            role="user",
+            content="什么是 FastAPI？",
+        )
+
+        self.assertEqual(message.role, "user")
+        self.assertEqual(message.content, "什么是 FastAPI？")
+
+    def test_invalid_role_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            ChatMessage(
+                role="system",
+                content="你是一个 AI 助手",
+            )
 
 
 if __name__ == "__main__":
