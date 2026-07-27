@@ -15,9 +15,12 @@ class InMemoryConversationStore:
         """
         获取指定会话的消息列表。
 
-        返回一个新的 list，防止外部代码直接修改内部列表。
+        返回消息副本，防止外部代码修改内部存储。
         """
-        return list(self._conversations.get(conversation_id, []))
+        return [
+            message.model_copy(deep=True)
+            for message in self._conversations.get(conversation_id, [])
+        ]
 
     def append_messages(
         self,
@@ -27,8 +30,15 @@ class InMemoryConversationStore:
         """
         向指定会话追加消息，并限制最大消息数量。
         """
+        if not messages:
+            return
+
         conversation = self._conversations[conversation_id]
-        conversation.extend(messages)
+
+        conversation.extend(
+            message.model_copy(deep=True)
+            for message in messages
+        )
 
         if len(conversation) > self._max_messages:
             self._conversations[conversation_id] = conversation[
