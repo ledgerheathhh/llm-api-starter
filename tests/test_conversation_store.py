@@ -117,6 +117,46 @@ class InMemoryConversationStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             InMemoryConversationStore(max_messages=0)
 
+    def test_mutating_input_message_does_not_change_store(self) -> None:
+        message = ChatMessage(
+            role="user",
+            content="原始内容",
+        )
+
+        self.store.append_messages(
+            "conversation-1",
+            [message],
+        )
+
+        message.content = "外部修改"
+
+        stored_messages = self.store.get_messages("conversation-1")
+
+        self.assertEqual(
+            stored_messages[0].content,
+            "原始内容",
+        )
+
+    def test_mutating_returned_message_does_not_change_store(self) -> None:
+        self.store.append_messages(
+            "conversation-1",
+            [
+                ChatMessage(
+                    role="user",
+                    content="原始内容",
+                ),
+            ],
+        )
+
+        messages = self.store.get_messages("conversation-1")
+        messages[0].content = "外部修改"
+
+        stored_messages = self.store.get_messages("conversation-1")
+
+        self.assertEqual(
+            stored_messages[0].content,
+            "原始内容",
+        )
 
 if __name__ == "__main__":
     unittest.main()
