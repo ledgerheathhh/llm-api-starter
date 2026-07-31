@@ -10,6 +10,7 @@ from app import main
 from app.routers import chat as chat_router
 from app.schemas.chat import ChatMessage, ChatRequest, ChatResponse
 from app.services import llm_service
+from app.services.conversation_store import InMemoryConversationStore
 
 
 class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
@@ -80,6 +81,152 @@ class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload, {"type": "error", "message": "服务异常"})
         self.assertNotIn("sensitive internal detail", events[0])
 
+    async def test_chat_uses_history_and_saves_new_messages(self) -> None:
+        conversation_id = "conversation-1"
+
+        store = InMemoryConversationStore(max_messages=20)
+        store.append_messages(
+            conversation_id,
+            [
+                ChatMessage(
+                    role="user",
+                    content="我叫 Ledger",
+                ),
+                ChatMessage(
+                    role="assistant",
+                    content="你好，Ledger。",
+                ),
+            ],
+        )
+
+        completion = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="你叫 Ledger。",
+                    )
+                )
+            ]
+        )
+
+        completions = SimpleNamespace(
+            create=AsyncMock(return_value=completion)
+        )
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=completions,
+            )
+        )
+
+        with (
+            patch.object(
+                llm_service,
+                "conversation_store",
+                store,
+            ),
+            patch.object(
+                llm_service,
+                "get_llm_client",
+                return_value=(
+                    client,
+                    "deepseek",
+                    "deepseek-chat",
+                ),
+            ),
+        ):
+            response = await llm_service.chat_completion(
+                ChatRequest(
+                    message="我叫什么？",
+                    conversation_id=conversation_id,
+                )
+            )
+
+        self.assertEqual(response.answer, "你叫 Ledger。")
+
+        completions.create.assert_awaited_once()
+
+        call_kwargs = completions.create.await_args.kwargs
+        sent_messages = call_kwargs["messages"]
+
+        self.assertEqual(
+            sent_messages,
+            [
+                {
+                    "role": "system",
+                    "content": llm_service.SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": "我叫 Ledger",
+                },
+                {
+                    "role": "assistant",
+                    "content": "你好，Ledger。",
+                },
+                {
+                    "role": "user",
+                    "content": "我叫什么？",
+                },
+            ],
+        )
+
+        stored_messages = store.get_messages(conversation_id)
+
+        self.assertEqual(len(stored_messages), 4)
+        self.assertEqual(stored_messages[-2].role, "user")
+        self.assertEqual(stored_messages[-2].content, "我叫什么？")
+        self.assertEqual(stored_messages[-1].role, "assistant")
+        self.assertEqual(stored_messages[-1].content, "你叫 Ledger。")
+
+    async def test_empty_response_does_not_save_messages(self) -> None:
+        conversation_id = "conversation-1"
+        store = InMemoryConversationStore()
+
+        completions = SimpleNamespace(
+            create=AsyncMock(
+                return_value=SimpleNamespace(
+                    choices=[],
+                )
+            )
+        )
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=completions,
+            )
+        )
+
+        with (
+            patch.object(
+                llm_service,
+                "conversation_store",
+                store,
+            ),
+            patch.object(
+                llm_service,
+                "get_llm_client",
+                return_value=(
+                    client,
+                    "deepseek",
+                    "deepseek-chat",
+                ),
+            ),
+        ):
+            with self.assertRaises(
+                llm_service.EmptyModelResponseError
+            ):
+                await llm_service.chat_completion(
+                    ChatRequest(
+                        message="测试问题",
+                        conversation_id=conversation_id,
+                    )
+                )
+
+        self.assertEqual(
+            store.get_messages(conversation_id),
+            [],
+        )
 
 class ChatRouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_error_is_sanitized(self) -> None:

@@ -6,7 +6,8 @@ from uuid import uuid4
 from openai import AsyncOpenAI, APIConnectionError, APIError, APITimeoutError
 
 from app.core.config import settings
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatMessage, ChatRequest, ChatResponse
+from app.services.conversation_store import conversation_store
 
 
 SYSTEM_PROMPT = "你是一个 AI 助手，回答要准确、简洁、结构清晰。"
@@ -78,18 +79,34 @@ async def close_llm_client() -> None:
         _llm_client_config = None
 
 
-def build_messages(message: str) -> list[dict[str, str]]:
-    """构造发送给模型的 messages。"""
-    return [
+def build_messages(
+    history: list[ChatMessage],
+    current_message: str,
+) -> list[dict[str, str]]:
+    """根据系统提示词、历史消息和当前问题构造模型上下文。"""
+    messages: list[dict[str, str]] = [
         {
             "role": "system",
             "content": SYSTEM_PROMPT,
-        },
+        }
+    ]
+
+    messages.extend(
+        {
+            "role": message.role,
+            "content": message.content,
+        }
+        for message in history
+    )
+
+    messages.append(
         {
             "role": "user",
-            "content": message,
-        },
-    ]
+            "content": current_message,
+        }
+    )
+
+    return messages
 
 
 def to_sse_data(data: dict) -> str:
@@ -99,11 +116,17 @@ def to_sse_data(data: dict) -> str:
 
 async def chat_completion(request: ChatRequest) -> ChatResponse:
     conversation_id = request.conversation_id or str(uuid4())
+
+    history = conversation_store.get_messages(conversation_id)
+
     client, provider, model = get_llm_client()
 
     completion = await client.chat.completions.create(
         model=model,
-        messages=build_messages(request.message),
+        messages=build_messages(
+            history=history,
+            current_message=request.message,
+        ),
         temperature=0.3,
         stream=False,
     )
@@ -115,6 +138,20 @@ async def chat_completion(request: ChatRequest) -> ChatResponse:
 
     if not answer:
         raise EmptyModelResponseError("模型返回为空")
+
+    conversation_store.append_messages(
+        conversation_id,
+        [
+            ChatMessage(
+                role="user",
+                content=request.message,
+            ),
+            ChatMessage(
+                role="assistant",
+                content=answer,
+            ),
+        ],
+    )
 
     return ChatResponse(
         answer=answer,
@@ -142,7 +179,10 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
 
         stream = await client.chat.completions.create(
             model=model,
-            messages=build_messages(request.message),
+            messages=build_messages(
+                history=[],
+                current_message=request.message,
+            ),
             temperature=0.3,
             stream=True,
         )
