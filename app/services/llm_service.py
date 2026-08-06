@@ -166,6 +166,7 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
     conversation_id = request.conversation_id or str(uuid4())
 
     try:
+        history = conversation_store.get_messages(conversation_id)
         client, provider, model = get_llm_client()
 
         yield to_sse_data(
@@ -180,12 +181,14 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
         stream = await client.chat.completions.create(
             model=model,
             messages=build_messages(
-                history=[],
+                history=history,
                 current_message=request.message,
             ),
             temperature=0.3,
             stream=True,
         )
+
+        answer_parts: list[str] = []
 
         async for chunk in stream:
             if not chunk.choices:
@@ -197,12 +200,33 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
             if not content:
                 continue
 
+            answer_parts.append(content)
+
             yield to_sse_data(
                 {
                     "type": "delta",
                     "content": content,
                 }
             )
+
+        answer = "".join(answer_parts)
+
+        if not answer:
+            raise EmptyModelResponseError("模型返回为空")
+
+        conversation_store.append_messages(
+            conversation_id,
+            [
+                ChatMessage(
+                    role="user",
+                    content=request.message,
+                ),
+                ChatMessage(
+                    role="assistant",
+                    content=answer,
+                ),
+            ],
+        )
 
         yield to_sse_data(
             {
@@ -234,6 +258,15 @@ async def stream_chat_completion(request: ChatRequest) -> AsyncIterator[str]:
             {
                 "type": "error",
                 "message": "模型服务错误",
+            }
+        )
+
+    except EmptyModelResponseError:
+        logger.exception("模型返回为空")
+        yield to_sse_data(
+            {
+                "type": "error",
+                "message": "模型返回为空",
             }
         )
 
