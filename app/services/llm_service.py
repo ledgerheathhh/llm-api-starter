@@ -36,6 +36,17 @@ def create_llm_client() -> LLMClientConfig:
 
         return client, provider, settings.DEEPSEEK_MODEL
 
+    if provider == "mistral":
+        if not settings.MISTRAL_API_KEY:
+            raise RuntimeError("缺少环境变量 MISTRAL_API_KEY")
+
+        client = AsyncOpenAI(
+            api_key=settings.MISTRAL_API_KEY,
+            base_url="https://api.mistral.ai/v1",
+        )
+
+        return client, provider, settings.MISTRAL_MODEL
+
     if provider == "openrouter":
         if not settings.OPENROUTER_API_KEY:
             raise RuntimeError("缺少环境变量 OPENROUTER_API_KEY")

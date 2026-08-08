@@ -1,6 +1,6 @@
 # llm-api-starter
 
-A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, OpenRouter, standard responses, and SSE streaming responses.
+A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, Mistral AI, OpenRouter, standard responses, and SSE streaming responses.
 
 ## Project Structure
 
@@ -45,6 +45,7 @@ Supported `LLM_PROVIDER` values:
 | Value | Description |
 | --- | --- |
 | `deepseek` | Calls the DeepSeek API directly. This is the default when the variable is not set. |
+| `mistral` | Calls the Mistral AI API directly. |
 | `openrouter` | Calls a model through OpenRouter. |
 
 ### DeepSeek
@@ -59,6 +60,19 @@ DEEPSEEK_MODEL=deepseek-chat
 
 - `DEEPSEEK_API_KEY`: Required. Your DeepSeek API key.
 - `DEEPSEEK_MODEL`: Optional. Defaults to `deepseek-chat`.
+
+### Mistral AI
+
+Add the following values to `.env`:
+
+```dotenv
+LLM_PROVIDER=mistral
+MISTRAL_API_KEY=your_mistral_api_key
+MISTRAL_MODEL=mistral-small-latest
+```
+
+- `MISTRAL_API_KEY`: Required. Your Mistral AI API key.
+- `MISTRAL_MODEL`: Optional. Defaults to `mistral-small-latest`.
 
 ### OpenRouter
 
@@ -180,7 +194,7 @@ The API returns sanitized errors:
 
 ## Testing
 
-The tests use Python's standard-library `unittest` module and mock all LLM calls, so they do not require an API key or send requests to DeepSeek or OpenRouter.
+The tests use Python's standard-library `unittest` module and mock all LLM calls, so they do not require an API key or send requests to DeepSeek, Mistral AI, or OpenRouter.
 
 ```bash
 python -m unittest discover -v

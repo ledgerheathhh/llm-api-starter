@@ -47,6 +47,42 @@ class LLMClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
         client.close.assert_awaited_once_with()
         self.assertIsNone(llm_service._llm_client_config)
 
+    async def test_mistral_client_uses_openai_compatible_api(self) -> None:
+        client = SimpleNamespace()
+
+        with (
+            patch.object(llm_service.settings, "LLM_PROVIDER", "mistral"),
+            patch.object(llm_service.settings, "MISTRAL_API_KEY", "test-key"),
+            patch.object(
+                llm_service.settings,
+                "MISTRAL_MODEL",
+                "mistral-small-latest",
+            ),
+            patch.object(
+                llm_service,
+                "AsyncOpenAI",
+                return_value=client,
+            ) as openai_client,
+        ):
+            client_config = llm_service.create_llm_client()
+
+        openai_client.assert_called_once_with(
+            api_key="test-key",
+            base_url="https://api.mistral.ai/v1",
+        )
+        self.assertEqual(
+            client_config,
+            (client, "mistral", "mistral-small-latest"),
+        )
+
+    async def test_mistral_client_requires_api_key(self) -> None:
+        with (
+            patch.object(llm_service.settings, "LLM_PROVIDER", "mistral"),
+            patch.object(llm_service.settings, "MISTRAL_API_KEY", None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "MISTRAL_API_KEY"):
+                llm_service.create_llm_client()
+
 
 class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_choices_raises_expected_error(self) -> None:
