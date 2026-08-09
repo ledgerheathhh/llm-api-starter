@@ -14,10 +14,12 @@ A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, Mistr
 │   ├── schemas/
 │   │   └── chat.py         # Request and response models
 │   ├── services/
-│   │   └── llm_service.py  # Provider selection, client lifecycle, and LLM calls
+│   │   ├── conversation_store.py # In-memory conversation history
+│   │   └── llm_service.py        # Provider selection, client lifecycle, and LLM calls
 │   └── main.py             # FastAPI application, lifecycle, and router registration
 ├── tests/
-│   └── test_chat.py        # Chat, validation, error, and lifecycle tests
+│   ├── test_chat.py                # Chat, validation, error, and lifecycle tests
+│   └── test_conversation_store.py  # Conversation store tests
 ├── .env.example       # Environment variable example
 ├── .gitignore
 ├── README.md
@@ -118,7 +120,7 @@ Example request:
 
 - `message`: Required. Must contain between 1 and 2,000 characters.
 - Leading and trailing whitespace is removed. A message containing only whitespace is rejected with HTTP `422`.
-- `conversation_id`: Optional. The server generates a UUID when this field is omitted. It currently identifies the request only; the server does not automatically store or load conversation history.
+- `conversation_id`: Optional. The server generates a UUID when this field is omitted. Reuse the `conversation_id` returned by the first request in later `/chat` or `/chat/stream` requests to include the stored prior turns in the model context.
 
 Example response:
 
@@ -137,6 +139,14 @@ Test with curl:
 curl -X POST http://127.0.0.1:8000/chat \
   -H 'Content-Type: application/json' \
   -d '{"message":"Describe FastAPI in one sentence."}'
+```
+
+Copy the `conversation_id` from the response and send it with the next turn:
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What was my previous question?","conversation_id":"7e23d71f-89b4-4be8-a41b-91f17a274d21"}'
 ```
 
 ## Streaming Chat Endpoint
@@ -182,6 +192,8 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream \
 ## Runtime Behavior
 
 The LLM client is created lazily on the first chat request and reused by later requests so its connection pool can be shared. FastAPI closes the client during application shutdown. This means the service and `/health` can start without an API key, while chat requests report a configuration error until the selected provider is configured.
+
+Completed conversation turns are stored in memory. Each `conversation_id` retains up to the latest 20 user and assistant messages, which are used as context by both chat endpoints. This history exists only for the lifetime of the server process: restarting or reloading the process clears it, and multiple worker processes do not share conversation history. Use persistent shared storage for conversation continuity across restarts or workers.
 
 The API returns sanitized errors:
 
