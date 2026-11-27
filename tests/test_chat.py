@@ -13,9 +13,38 @@ from app.services import llm_service
 from app.services.conversation_store import InMemoryConversationStore
 
 
+def create_stream_chunk(content: str):
+    """构造一个模拟 OpenAI 流式响应 chunk。"""
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(
+                    content=content,
+                )
+            )
+        ]
+    )
+
+
+async def create_chunk_stream(contents: list[str]):
+    """根据字符串列表构造异步流。"""
+    for content in contents:
+        yield create_stream_chunk(content)
+
+
+async def create_failing_chunk_stream():
+    """模拟模型已经返回部分内容后发生异常。"""
+    yield create_stream_chunk("部分回答")
+    raise ValueError("模拟流式处理中断")
+
+
 class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
     async def test_lifespan_closes_llm_client(self) -> None:
-        with patch.object(main, "close_llm_client", AsyncMock()) as close_client:
+        with patch.object(
+            main,
+            "close_llm_client",
+            AsyncMock(),
+        ) as close_client:
             async with main.lifespan(main.app):
                 pass
 
@@ -30,22 +59,39 @@ class LLMClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
         llm_service._llm_client_config = None
 
     async def test_client_is_reused_and_closed(self) -> None:
-        client = SimpleNamespace(close=AsyncMock())
-        client_config = (client, "deepseek", "deepseek-chat")
+        client = SimpleNamespace(
+            close=AsyncMock(),
+        )
+
+        client_config = (
+            client,
+            "deepseek",
+            "deepseek-chat",
+        )
 
         with patch.object(
             llm_service,
             "create_llm_client",
             return_value=client_config,
         ) as create_client:
-            self.assertIs(llm_service.get_llm_client(), client_config)
-            self.assertIs(llm_service.get_llm_client(), client_config)
+            self.assertIs(
+                llm_service.get_llm_client(),
+                client_config,
+            )
+
+            self.assertIs(
+                llm_service.get_llm_client(),
+                client_config,
+            )
+
             create_client.assert_called_once_with()
 
             await llm_service.close_llm_client()
 
         client.close.assert_awaited_once_with()
-        self.assertIsNone(llm_service._llm_client_config)
+        self.assertIsNone(
+            llm_service._llm_client_config,
+        )
 
     async def test_mistral_client_uses_openai_compatible_api(self) -> None:
         client = SimpleNamespace()
@@ -87,40 +133,83 @@ class LLMClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
 class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_choices_raises_expected_error(self) -> None:
         completions = SimpleNamespace(
-            create=AsyncMock(return_value=SimpleNamespace(choices=[]))
+            create=AsyncMock(
+                return_value=SimpleNamespace(
+                    choices=[],
+                )
+            )
         )
-        client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=completions,
+            )
+        )
 
         with patch.object(
             llm_service,
             "get_llm_client",
-            return_value=(client, "deepseek", "deepseek-chat"),
+            return_value=(
+                client,
+                "deepseek",
+                "deepseek-chat",
+            ),
         ):
-            with self.assertRaises(llm_service.EmptyModelResponseError):
-                await llm_service.chat_completion(ChatRequest(message="hello"))
+            with self.assertRaises(
+                llm_service.EmptyModelResponseError
+            ):
+                await llm_service.chat_completion(
+                    ChatRequest(
+                        message="hello",
+                    )
+                )
 
     async def test_stream_hides_unexpected_error_details(self) -> None:
         with patch.object(
             llm_service,
             "get_llm_client",
-            side_effect=ValueError("sensitive internal detail"),
+            side_effect=ValueError(
+                "sensitive internal detail"
+            ),
         ):
-            with self.assertLogs(llm_service.logger, level="ERROR"):
+            with self.assertLogs(
+                llm_service.logger,
+                level="ERROR",
+            ):
                 events = [
                     event
-                    async for event in llm_service.stream_chat_completion(
-                        ChatRequest(message="hello")
+                    async for event
+                    in llm_service.stream_chat_completion(
+                        ChatRequest(
+                            message="hello",
+                        )
                     )
                 ]
 
-        payload = json.loads(events[0].removeprefix("data: "))
-        self.assertEqual(payload, {"type": "error", "message": "服务异常"})
-        self.assertNotIn("sensitive internal detail", events[0])
+        payload = json.loads(
+            events[0].removeprefix("data: ")
+        )
+
+        self.assertEqual(
+            payload,
+            {
+                "type": "error",
+                "message": "服务异常",
+            },
+        )
+
+        self.assertNotIn(
+            "sensitive internal detail",
+            events[0],
+        )
 
     async def test_chat_uses_history_and_saves_new_messages(self) -> None:
         conversation_id = "conversation-1"
 
-        store = InMemoryConversationStore(max_messages=20)
+        store = InMemoryConversationStore(
+            max_messages=20,
+        )
+
         store.append_messages(
             conversation_id,
             [
@@ -146,7 +235,9 @@ class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         completions = SimpleNamespace(
-            create=AsyncMock(return_value=completion)
+            create=AsyncMock(
+                return_value=completion,
+            )
         )
 
         client = SimpleNamespace(
@@ -178,11 +269,17 @@ class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-        self.assertEqual(response.answer, "你叫 Ledger。")
+        self.assertEqual(
+            response.answer,
+            "你叫 Ledger。",
+        )
 
         completions.create.assert_awaited_once()
 
-        call_kwargs = completions.create.await_args.kwargs
+        call_kwargs = (
+            completions.create.await_args.kwargs
+        )
+
         sent_messages = call_kwargs["messages"]
 
         self.assertEqual(
@@ -207,16 +304,38 @@ class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        stored_messages = store.get_messages(conversation_id)
+        stored_messages = store.get_messages(
+            conversation_id
+        )
 
-        self.assertEqual(len(stored_messages), 4)
-        self.assertEqual(stored_messages[-2].role, "user")
-        self.assertEqual(stored_messages[-2].content, "我叫什么？")
-        self.assertEqual(stored_messages[-1].role, "assistant")
-        self.assertEqual(stored_messages[-1].content, "你叫 Ledger。")
+        self.assertEqual(
+            len(stored_messages),
+            4,
+        )
+
+        self.assertEqual(
+            stored_messages[-2].role,
+            "user",
+        )
+
+        self.assertEqual(
+            stored_messages[-2].content,
+            "我叫什么？",
+        )
+
+        self.assertEqual(
+            stored_messages[-1].role,
+            "assistant",
+        )
+
+        self.assertEqual(
+            stored_messages[-1].content,
+            "你叫 Ledger。",
+        )
 
     async def test_empty_response_does_not_save_messages(self) -> None:
         conversation_id = "conversation-1"
+
         store = InMemoryConversationStore()
 
         completions = SimpleNamespace(
@@ -264,21 +383,357 @@ class ChatCompletionTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
+    async def test_stream_uses_history_and_saves_complete_answer(
+        self,
+    ) -> None:
+        conversation_id = "conversation-1"
+
+        store = InMemoryConversationStore(
+            max_messages=20,
+        )
+
+        store.append_messages(
+            conversation_id,
+            [
+                ChatMessage(
+                    role="user",
+                    content="我叫 Ledger",
+                ),
+                ChatMessage(
+                    role="assistant",
+                    content="你好，Ledger。",
+                ),
+            ],
+        )
+
+        completions = SimpleNamespace(
+            create=AsyncMock(
+                return_value=create_chunk_stream(
+                    [
+                        "你叫",
+                        " Ledger",
+                        "。",
+                    ]
+                )
+            )
+        )
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=completions,
+            )
+        )
+
+        with (
+            patch.object(
+                llm_service,
+                "conversation_store",
+                store,
+            ),
+            patch.object(
+                llm_service,
+                "get_llm_client",
+                return_value=(
+                    client,
+                    "deepseek",
+                    "deepseek-chat",
+                ),
+            ),
+        ):
+            events = [
+                event
+                async for event
+                in llm_service.stream_chat_completion(
+                    ChatRequest(
+                        message="我叫什么？",
+                        conversation_id=conversation_id,
+                    )
+                )
+            ]
+
+        payloads = [
+            json.loads(
+                event.removeprefix("data: ")
+            )
+            for event in events
+        ]
+
+        self.assertEqual(
+            payloads,
+            [
+                {
+                    "type": "meta",
+                    "conversation_id": conversation_id,
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                },
+                {
+                    "type": "delta",
+                    "content": "你叫",
+                },
+                {
+                    "type": "delta",
+                    "content": " Ledger",
+                },
+                {
+                    "type": "delta",
+                    "content": "。",
+                },
+                {
+                    "type": "done",
+                },
+            ],
+        )
+
+        sent_messages = (
+            completions.create.await_args.kwargs[
+                "messages"
+            ]
+        )
+
+        self.assertEqual(
+            sent_messages,
+            [
+                {
+                    "role": "system",
+                    "content": llm_service.SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": "我叫 Ledger",
+                },
+                {
+                    "role": "assistant",
+                    "content": "你好，Ledger。",
+                },
+                {
+                    "role": "user",
+                    "content": "我叫什么？",
+                },
+            ],
+        )
+
+        stored_messages = store.get_messages(
+            conversation_id
+        )
+
+        self.assertEqual(
+            len(stored_messages),
+            4,
+        )
+
+        self.assertEqual(
+            stored_messages[-2].role,
+            "user",
+        )
+
+        self.assertEqual(
+            stored_messages[-2].content,
+            "我叫什么？",
+        )
+
+        self.assertEqual(
+            stored_messages[-1].role,
+            "assistant",
+        )
+
+        self.assertEqual(
+            stored_messages[-1].content,
+            "你叫 Ledger。",
+        )
+
+    async def test_stream_error_does_not_save_partial_answer(
+        self,
+    ) -> None:
+        conversation_id = "conversation-1"
+
+        store = InMemoryConversationStore()
+
+        completions = SimpleNamespace(
+            create=AsyncMock(
+                return_value=create_failing_chunk_stream()
+            )
+        )
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=completions,
+            )
+        )
+
+        with (
+            patch.object(
+                llm_service,
+                "conversation_store",
+                store,
+            ),
+            patch.object(
+                llm_service,
+                "get_llm_client",
+                return_value=(
+                    client,
+                    "deepseek",
+                    "deepseek-chat",
+                ),
+            ),
+            self.assertLogs(
+                llm_service.logger,
+                level="ERROR",
+            ),
+        ):
+            events = [
+                event
+                async for event
+                in llm_service.stream_chat_completion(
+                    ChatRequest(
+                        message="测试问题",
+                        conversation_id=conversation_id,
+                    )
+                )
+            ]
+
+        payloads = [
+            json.loads(
+                event.removeprefix("data: ")
+            )
+            for event in events
+        ]
+
+        self.assertEqual(
+            payloads[-1],
+            {
+                "type": "error",
+                "message": "服务异常",
+            },
+        )
+
+        self.assertNotIn(
+            {
+                "type": "done",
+            },
+            payloads,
+        )
+
+        self.assertEqual(
+            store.get_messages(conversation_id),
+            [],
+        )
+
+    async def test_empty_stream_does_not_save_messages(
+        self,
+    ) -> None:
+        conversation_id = "conversation-1"
+
+        store = InMemoryConversationStore()
+
+        completions = SimpleNamespace(
+            create=AsyncMock(
+                return_value=create_chunk_stream([])
+            )
+        )
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=completions,
+            )
+        )
+
+        with (
+            patch.object(
+                llm_service,
+                "conversation_store",
+                store,
+            ),
+            patch.object(
+                llm_service,
+                "get_llm_client",
+                return_value=(
+                    client,
+                    "deepseek",
+                    "deepseek-chat",
+                ),
+            ),
+            self.assertLogs(
+                llm_service.logger,
+                level="ERROR",
+            ),
+        ):
+            events = [
+                event
+                async for event
+                in llm_service.stream_chat_completion(
+                    ChatRequest(
+                        message="测试问题",
+                        conversation_id=conversation_id,
+                    )
+                )
+            ]
+
+        payloads = [
+            json.loads(
+                event.removeprefix("data: ")
+            )
+            for event in events
+        ]
+
+        self.assertEqual(
+            payloads[-1],
+            {
+                "type": "error",
+                "message": "模型返回为空",
+            },
+        )
+
+        self.assertNotIn(
+            {
+                "type": "done",
+            },
+            payloads,
+        )
+
+        self.assertEqual(
+            store.get_messages(conversation_id),
+            [],
+        )
+
+
 class ChatRouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_error_is_sanitized(self) -> None:
         with patch.object(
             chat_router,
             "chat_completion",
-            AsyncMock(side_effect=RuntimeError("sensitive internal detail")),
+            AsyncMock(
+                side_effect=RuntimeError(
+                    "sensitive internal detail"
+                )
+            ),
         ):
-            with self.assertLogs(chat_router.logger, level="ERROR"):
-                with self.assertRaises(HTTPException) as context:
-                    await chat_router.chat(ChatRequest(message="hello"))
+            with self.assertLogs(
+                chat_router.logger,
+                level="ERROR",
+            ):
+                with self.assertRaises(
+                    HTTPException
+                ) as context:
+                    await chat_router.chat(
+                        ChatRequest(
+                            message="hello",
+                        )
+                    )
 
-        self.assertEqual(context.exception.status_code, 500)
-        self.assertEqual(context.exception.detail, "模型服务配置错误")
+        self.assertEqual(
+            context.exception.status_code,
+            500,
+        )
 
-    async def test_success_response_is_unchanged(self) -> None:
+        self.assertEqual(
+            context.exception.detail,
+            "模型服务配置错误",
+        )
+
+    async def test_success_response_is_unchanged(
+        self,
+    ) -> None:
         expected = ChatResponse(
             answer="hello",
             conversation_id="conversation-id",
@@ -289,20 +744,40 @@ class ChatRouterTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             chat_router,
             "chat_completion",
-            AsyncMock(return_value=expected),
+            AsyncMock(
+                return_value=expected,
+            ),
         ):
-            response = await chat_router.chat(ChatRequest(message="hello"))
+            response = await chat_router.chat(
+                ChatRequest(
+                    message="hello",
+                )
+            )
 
-        self.assertEqual(response, expected)
+        self.assertEqual(
+            response,
+            expected,
+        )
 
 
 class ChatRequestTests(unittest.TestCase):
     def test_message_is_trimmed(self) -> None:
-        self.assertEqual(ChatRequest(message="  hello  ").message, "hello")
+        self.assertEqual(
+            ChatRequest(
+                message="  hello  "
+            ).message,
+            "hello",
+        )
 
-    def test_whitespace_only_message_is_rejected(self) -> None:
-        with self.assertRaises(ValidationError):
-            ChatRequest(message="   ")
+    def test_whitespace_only_message_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaises(
+            ValidationError
+        ):
+            ChatRequest(
+                message="   ",
+            )
 
 
 class ChatMessageTests(unittest.TestCase):
@@ -312,11 +787,20 @@ class ChatMessageTests(unittest.TestCase):
             content="什么是 FastAPI？",
         )
 
-        self.assertEqual(message.role, "user")
-        self.assertEqual(message.content, "什么是 FastAPI？")
+        self.assertEqual(
+            message.role,
+            "user",
+        )
+
+        self.assertEqual(
+            message.content,
+            "什么是 FastAPI？",
+        )
 
     def test_invalid_role_is_rejected(self) -> None:
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(
+            ValidationError
+        ):
             ChatMessage(
                 role="system",
                 content="你是一个 AI 助手",
