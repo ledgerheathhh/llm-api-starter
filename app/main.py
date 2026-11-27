@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.chat import router as chat_router
+from app.routers.conversations import router as conversations_router
 from app.services.llm_service import close_llm_client
 
 
@@ -46,3 +47,4 @@ async def health() -> dict[str, str]:
 
 
 app.include_router(chat_router)
+app.include_router(conversations_router)

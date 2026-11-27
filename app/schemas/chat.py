@@ -30,3 +30,8 @@ class ChatResponse(BaseModel):
     conversation_id: str
     provider: str
     model: str
+
+
+class ConversationResponse(BaseModel):
+    conversation_id: str
+    messages: list[ChatMessage]

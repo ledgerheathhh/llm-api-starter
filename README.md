@@ -10,7 +10,8 @@ A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, Mistr
 │   ├── core/
 │   │   └── config.py       # Environment configuration
 │   ├── routers/
-│   │   └── chat.py         # Chat API routes and HTTP error mapping
+│   │   ├── chat.py         # Chat API routes and HTTP error mapping
+│   │   └── conversations.py # Conversation query and deletion
 │   ├── schemas/
 │   │   └── chat.py         # Request and response models
 │   ├── services/
@@ -19,7 +20,8 @@ A minimal FastAPI backend for calling LLM chat APIs. It supports DeepSeek, Mistr
 │   └── main.py             # FastAPI application, lifecycle, and router registration
 ├── tests/
 │   ├── test_chat.py                # Chat, validation, error, and lifecycle tests
-│   └── test_conversation_store.py  # Conversation store tests
+│   ├── test_conversation_store.py  # Conversation store tests
+│   └── test_conversations.py       # Conversation HTTP API tests
 ├── .env.example       # Environment variable example
 ├── .gitignore
 ├── README.md
@@ -188,6 +190,36 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream \
   -H 'Content-Type: application/json' \
   -d '{"message":"Describe FastAPI in three points."}'
 ```
+
+## Conversation Management
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET | /conversations/{conversation_id} | HTTP 200 with retained messages, or 404 if no history exists |
+| DELETE | /conversations/{conversation_id} | HTTP 204 with an empty body, including repeated deletion or an unknown ID |
+
+Use the conversation ID returned by the chat response or the streaming meta event:
+
+```bash
+curl -i http://127.0.0.1:8000/conversations/YOUR_CONVERSATION_ID
+curl -i -X DELETE http://127.0.0.1:8000/conversations/YOUR_CONVERSATION_ID
+```
+
+Example GET response:
+
+```json
+{
+  "conversation_id": "example-id",
+  "messages": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi!"}
+  ]
+}
+```
+
+Deletion clears the in-memory history. A later chat request using the same ID starts a new history. Deletion does not cancel in-flight chat requests; those requests may recreate the history when they finish. For now, avoid concurrent chat and deletion for the same ID.
+
+**Local development only:** These endpoints have no authentication or conversation ownership checks. Do not expose them to untrusted users or the public internet.
 
 ## Runtime Behavior
 
